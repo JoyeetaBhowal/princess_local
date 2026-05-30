@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QFileDialog,
     QListWidget,
     QListWidgetItem,
     QTextEdit,
@@ -50,6 +51,7 @@ from config import (
     WAKE_WORD_PHRASE,
 )
 from core.approvals import approval_queue
+from core.knowledge import knowledge_library
 from core.llm import http_session
 from core.news import news_manager
 from core.tts import tts
@@ -211,6 +213,26 @@ User request:
             self.error.emit(str(exc))
 
 
+class KnowledgeIndexThread(QThread):
+    indexed = Signal(object)
+    error = Signal(str)
+    status_update = Signal(str)
+
+    def __init__(self, files: list[str]):
+        super().__init__()
+        self.files = files
+
+    def run(self):
+        indexed_docs = []
+        for file_path in self.files:
+            try:
+                self.status_update.emit(f"Indexing {Path(file_path).name}...")
+                indexed_docs.append(knowledge_library.index_file(file_path))
+            except Exception as exc:
+                self.error.emit(f"{Path(file_path).name}: {exc}")
+        self.indexed.emit(indexed_docs)
+
+
 class CommandCenterTab(QWidget):
     """Internet briefing, draft writing, and approval-gated work queue."""
 
@@ -229,6 +251,7 @@ class CommandCenterTab(QWidget):
         self._draft_worker = None
         self._talk_worker = None
         self._plan_worker = None
+        self._knowledge_worker = None
         self._voice_thread = None
         self._voice_worker = None
         self.mission_rows = {}
@@ -626,6 +649,77 @@ class CommandCenterTab(QWidget):
             return row, value_label
         return row
 
+    def refresh_knowledge_documents(self):
+        if not hasattr(self, "knowledge_docs_layout"):
+            return
+        self._clear_layout(self.knowledge_docs_layout)
+        docs = knowledge_library.list_documents()[:5]
+        if not docs:
+            self.knowledge_docs_layout.addWidget(CaptionLabel("No indexed files yet.", self))
+            return
+        for doc in docs:
+            self.knowledge_docs_layout.addWidget(
+                self._build_mission_row(doc.title, f"{doc.status} | {doc.chunk_count}")
+            )
+
+    def add_knowledge_files(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Add Knowledge Files",
+            str(Path.home()),
+            "Knowledge Files (*.txt *.md *.markdown *.csv *.pdf *.docx);;All Files (*.*)",
+        )
+        if not files:
+            return
+        self.add_knowledge_btn.setEnabled(False)
+        self.knowledge_status.setText("Indexing local files...")
+        self._set_mission_status("Reading", "active")
+        self.mission_state.setText("Reading local files into the private knowledge index.")
+        self._knowledge_worker = KnowledgeIndexThread(files)
+        self._knowledge_worker.status_update.connect(self.knowledge_status.setText)
+        self._knowledge_worker.indexed.connect(self._on_knowledge_indexed)
+        self._knowledge_worker.error.connect(self._on_knowledge_error)
+        self._knowledge_worker.finished.connect(self._on_knowledge_finished)
+        self._knowledge_worker.start()
+
+    def _on_knowledge_indexed(self, docs: object):
+        count = len(docs) if docs else 0
+        self.knowledge_status.setText(f"Indexed {count} file(s) locally.")
+        self._set_mission_status("Reading", "done")
+        self.mission_state.setText("Knowledge Library updated. You can search local files now.")
+        self.refresh_knowledge_documents()
+
+    def _on_knowledge_error(self, error: str):
+        self.knowledge_status.setText("Some files could not be indexed.")
+        self._set_mission_status("Reading", "error")
+        self._warn(f"Knowledge indexing warning: {error}")
+
+    def _on_knowledge_finished(self):
+        self._knowledge_worker = None
+        self.add_knowledge_btn.setEnabled(True)
+
+    def search_knowledge(self):
+        query = self.knowledge_search.text().strip()
+        if not query:
+            self.knowledge_status.setText("Enter a local knowledge search first.")
+            return
+        self._set_mission_status("Reading", "searching")
+        results = knowledge_library.search(query, limit=5)
+        if not results:
+            self.knowledge_results.setPlainText("No local matches found yet.")
+            self.knowledge_status.setText("No local matches found.")
+            self._set_mission_status("Reading", "standby")
+            return
+        lines = []
+        for index, item in enumerate(results, 1):
+            lines.append(
+                f"{index}. {item.get('title')} | chunk {item.get('chunk_index')}\n"
+                f"{item.get('snippet')}\n"
+            )
+        self.knowledge_results.setPlainText("\n".join(lines))
+        self.knowledge_status.setText(f"{len(results)} local result(s).")
+        self._set_mission_status("Reading", "done")
+
     def _build_knowledge_panel(self) -> QWidget:
         panel = QFrame(self)
         panel.setObjectName("commandPanel")
@@ -637,23 +731,31 @@ class CommandCenterTab(QWidget):
 
         self.knowledge_search = LineEdit(self)
         self.knowledge_search.setPlaceholderText("Ask about your books or notes...")
+        self.knowledge_search.returnPressed.connect(self.search_knowledge)
         layout.addWidget(self.knowledge_search)
 
-        files = [
-            path.name
-            for path in sorted(self.knowledge_dir.iterdir())
-            if path.is_file()
-        ][:5]
-        if files:
-            for name in files:
-                layout.addWidget(self._build_mission_row(name, "local"))
-        else:
-            layout.addWidget(CaptionLabel("No indexed files yet.", self))
+        self.knowledge_docs_layout = QVBoxLayout()
+        self.knowledge_docs_layout.setSpacing(6)
+        layout.addLayout(self.knowledge_docs_layout)
 
-        add_btn = PushButton(FIF.ADD, "Add Files", self)
-        add_btn.setEnabled(False)
-        layout.addWidget(add_btn)
-        layout.addWidget(CaptionLabel("Indexer shell ready. Full ingestion comes next.", self))
+        actions = QHBoxLayout()
+        self.add_knowledge_btn = PushButton(FIF.ADD, "Add Files", self)
+        self.add_knowledge_btn.clicked.connect(self.add_knowledge_files)
+        actions.addWidget(self.add_knowledge_btn)
+        self.search_knowledge_btn = PushButton(FIF.SEARCH, "Search", self)
+        self.search_knowledge_btn.clicked.connect(self.search_knowledge)
+        actions.addWidget(self.search_knowledge_btn)
+        layout.addLayout(actions)
+
+        self.knowledge_status = CaptionLabel("Local FTS index ready.", self)
+        layout.addWidget(self.knowledge_status)
+
+        self.knowledge_results = QTextEdit(self)
+        self.knowledge_results.setReadOnly(True)
+        self.knowledge_results.setMinimumHeight(90)
+        self.knowledge_results.setPlaceholderText("Search results from local files will appear here.")
+        layout.addWidget(self.knowledge_results)
+        self.refresh_knowledge_documents()
         return panel
 
     def _build_draft_panel(self) -> QWidget:
