@@ -48,76 +48,130 @@ QWidget#chatContent, QWidget#plannerPanel, QWidget#briefingView, QWidget#command
     background-color: transparent;
 }
 
-  QFrame#commandPanel {
-      background-color: #08111f;
-      border: 1px solid #1f3f5f;
-      border-radius: 8px;
-  }
-  
-  QFrame#commandPanelFun {
-      background-color: #071522;
-      border: 1px solid rgba(51, 181, 229, 0.35);
-      border-radius: 8px;
-  }
-  
-  QFrame#commandPanelHero {
-      background-color: #0b1728;
-      border: 1px solid rgba(255, 187, 51, 0.40);
-      border-radius: 8px;
-  }
-  
-  QFrame#commandPanel:hover, QFrame#commandPanelFun:hover, QFrame#commandPanelHero:hover {
-      border: 1px solid rgba(51, 181, 229, 0.65);
-  }
+QFrame#commandPanel {
+    background-color: rgba(8, 17, 31, 0.94);
+    border: 1px solid rgba(51, 181, 229, 0.20);
+    border-radius: 14px;
+}
 
-  QFrame#commandHeader {
-      background-color: #07101e;
-      border: 1px solid rgba(51, 181, 229, 0.52);
-      border-radius: 8px;
-  }
+QFrame#commandPanelFun {
+    background-color: rgba(7, 21, 34, 0.96);
+    border: 1px solid rgba(51, 181, 229, 0.35);
+    border-radius: 14px;
+}
 
-  QLabel#commandCore {
-      background-color: #091a28;
-      color: #33d6ff;
-      border: 2px solid rgba(51, 214, 255, 0.72);
-      border-radius: 39px;
-      font-size: 34px;
-      font-weight: 700;
-  }
+QFrame#commandPanelHero, QFrame#commandPanelCore {
+    background-color: rgba(9, 18, 34, 0.97);
+    border: 1px solid rgba(123, 97, 255, 0.38);
+    border-radius: 16px;
+}
 
-  QFrame#commandChip_good,
-  QFrame#commandChip_warn,
-  QFrame#commandChip_muted {
-      background-color: #0d1a2b;
-      border-radius: 6px;
-      min-width: 92px;
-  }
+QFrame#commandPanelCore {
+    border: 1px solid rgba(51, 214, 255, 0.52);
+}
 
-  QFrame#commandChip_good {
-      border: 1px solid rgba(51, 214, 255, 0.55);
-  }
+QFrame#commandPanel:hover,
+QFrame#commandPanelFun:hover,
+QFrame#commandPanelHero:hover,
+QFrame#commandPanelCore:hover {
+    border: 1px solid rgba(51, 214, 255, 0.70);
+}
 
-  QFrame#commandChip_warn {
-      border: 1px solid rgba(255, 187, 51, 0.64);
-  }
+QFrame#commandHeader {
+    background-color: rgba(5, 15, 30, 0.98);
+    border: 1px solid rgba(51, 214, 255, 0.52);
+    border-radius: 18px;
+}
 
-  QFrame#commandChip_muted {
-      border: 1px solid rgba(139, 155, 180, 0.40);
-  }
+QFrame#commandStatusBar {
+    background-color: rgba(6, 13, 24, 0.94);
+    border: 1px solid rgba(51, 181, 229, 0.18);
+    border-radius: 10px;
+}
 
-  QFrame#commandAppTile {
-      background-color: #0b1b2c;
-      border: 1px solid rgba(51, 181, 229, 0.24);
-      border-radius: 8px;
-  }
+QLabel#commandCore {
+    background-color: #071827;
+    color: #33d6ff;
+    border: 2px solid rgba(51, 214, 255, 0.75);
+    border-radius: 39px;
+    font-size: 34px;
+    font-weight: 700;
+}
 
-  QFrame#commandAppTile:hover {
-      background-color: #102844;
-      border: 1px solid rgba(51, 214, 255, 0.72);
-  }
-  
-  QFrame#commandItem {
-      background-color: #141c2f;
+QFrame#commandChip_good,
+QFrame#commandChip_warn,
+QFrame#commandChip_muted {
+    background-color: rgba(13, 26, 43, 0.96);
+    border-radius: 10px;
+    min-width: 92px;
+}
+
+QFrame#commandChip_good {
+    border: 1px solid rgba(51, 214, 255, 0.55);
+}
+
+QFrame#commandChip_warn {
+    border: 1px solid rgba(255, 187, 51, 0.64);
+}
+
+QFrame#commandChip_muted {
+    border: 1px solid rgba(139, 155, 180, 0.40);
+}
+
+QFrame#commandAppTile, QFrame#commandMiniRow {
+    background-color: rgba(11, 27, 44, 0.94);
+    border: 1px solid rgba(51, 181, 229, 0.24);
+    border-radius: 10px;
+}
+
+QFrame#commandAppTile:hover {
+    background-color: rgba(16, 40, 68, 0.98);
+    border: 1px solid rgba(51, 214, 255, 0.72);
+}
+
+PushButton#commandPromptChip {
+    background-color: rgba(12, 28, 48, 0.92);
+    border: 1px solid rgba(123, 97, 255, 0.36);
+    border-radius: 14px;
+    padding: 6px 10px;
+}
+
+PushButton#commandPromptChip:hover {
+    border: 1px solid rgba(51, 214, 255, 0.70);
+    background-color: rgba(18, 45, 76, 0.96);
+}
+
+QFrame#commandCoreBadge {
+    background-color: rgba(6, 20, 36, 0.94);
+    border: 1px solid rgba(51, 214, 255, 0.28);
+    border-radius: 10px;
+    min-width: 110px;
+}
+
+TextEdit#commandCoreLog {
+    background-color: rgba(4, 11, 22, 0.78);
+    border: 1px solid rgba(51, 181, 229, 0.20);
+    border-radius: 14px;
+    padding: 10px;
+    color: #e8eaed;
+}
+
+LineEdit#commandCoreInput {
+    background-color: rgba(7, 18, 34, 0.98);
+    border: 1px solid rgba(51, 214, 255, 0.35);
+    border-radius: 18px;
+    padding-left: 14px;
+    padding-right: 14px;
+    color: #ffffff;
+}
+
+LineEdit#commandCoreInput:focus {
+    background-color: rgba(10, 28, 50, 0.98);
+    border: 1px solid rgba(51, 214, 255, 0.85);
+}
+
+QFrame#commandItem {
+    background-color: #141c2f;
     border: 1px solid #1f2a42;
     border-radius: 6px;
 }

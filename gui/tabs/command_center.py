@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import random
+from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -35,6 +36,9 @@ from config import (
     ASSISTANT_NAME,
     ASSISTANT_SYSTEM_PROMPT,
     DAILY_PERMISSION_REQUIRED,
+    INTERNET_ENABLED,
+    INTERNET_REQUIRES_APPROVAL,
+    MAX_RESEARCH_RESULTS,
     OLLAMA_URL,
     RESPONDER_MODEL,
     SPEAK_RESPONSES,
@@ -43,6 +47,7 @@ from config import (
     TTS_ENABLED,
     VOICE_ASSISTANT_ENABLED,
     WAKE_WORD_ENABLED,
+    WAKE_WORD_PHRASE,
 )
 from core.approvals import approval_queue
 from core.llm import http_session
@@ -214,6 +219,10 @@ class CommandCenterTab(QWidget):
     def __init__(self, parent=None, auto_load: bool = True):
         super().__init__(parent)
         self.setObjectName("commandCenterInterface")
+        self.knowledge_dir = Path("data") / "knowledge"
+        self.index_dir = Path("data") / "index"
+        self.knowledge_dir.mkdir(parents=True, exist_ok=True)
+        self.index_dir.mkdir(parents=True, exist_ok=True)
         self.all_updates = []
         self.selected_approval_id = None
         self._updates_thread = None
@@ -222,6 +231,7 @@ class CommandCenterTab(QWidget):
         self._plan_worker = None
         self._voice_thread = None
         self._voice_worker = None
+        self.mission_rows = {}
         self.command_messages = [
             {
                 "role": "system",
@@ -247,21 +257,21 @@ class CommandCenterTab(QWidget):
         root.addWidget(self._build_command_header())
 
         columns = QHBoxLayout()
-        columns.setSpacing(14)
+        columns.setSpacing(16)
         root.addLayout(columns, 1)
 
-        columns.addWidget(self._build_updates_panel(), 3)
+        columns.addWidget(self._build_updates_panel(), 2)
 
         middle_stack = QWidget(self)
         middle_layout = QVBoxLayout(middle_stack)
         middle_layout.setContentsMargins(0, 0, 0, 0)
         middle_layout.setSpacing(14)
-        middle_layout.addWidget(self._build_action_panel(), 2)
-        middle_layout.addWidget(self._build_talk_panel(), 2)
-        middle_layout.addWidget(self._build_draft_panel(), 3)
-        columns.addWidget(middle_stack, 3)
+        middle_layout.addWidget(self._build_talk_panel(), 5)
+        middle_layout.addWidget(self._build_action_panel(), 4)
+        columns.addWidget(middle_stack, 4)
 
-        columns.addWidget(self._build_approvals_panel(), 2)
+        columns.addWidget(self._build_right_rail(), 2)
+        root.addWidget(self._build_bottom_status())
 
     def _build_command_header(self) -> QWidget:
         panel = QFrame(self)
@@ -278,7 +288,7 @@ class CommandCenterTab(QWidget):
 
         title_block = QVBoxLayout()
         title = TitleLabel("Princess Command Center", self)
-        subtitle = BodyLabel("A cinematic operations deck for research, voice, planning, approvals, and web tasks.", self)
+        subtitle = BodyLabel("Local-first personal AI for voice, research, memory, and execution.", self)
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
 
@@ -287,6 +297,8 @@ class CommandCenterTab(QWidget):
         chips.addWidget(self._build_status_chip("LOCAL MODEL", RESPONDER_MODEL, "good"))
         chips.addWidget(self._build_status_chip("VOICE", "on" if VOICE_ASSISTANT_ENABLED else "off", "good" if VOICE_ASSISTANT_ENABLED else "muted"))
         chips.addWidget(self._build_status_chip("WAKE", "on" if WAKE_WORD_ENABLED else "off", "warn" if WAKE_WORD_ENABLED else "muted"))
+        chips.addWidget(self._build_status_chip("INTERNET", "available" if INTERNET_ENABLED else "off", "good" if INTERNET_ENABLED else "muted"))
+        chips.addWidget(self._build_status_chip("MEMORY", "local", "good"))
         chips.addWidget(self._build_status_chip("APPROVAL", "required" if SOCIAL_ACTIONS_REQUIRE_APPROVAL else "off", "good" if SOCIAL_ACTIONS_REQUIRE_APPROVAL else "warn"))
         title_block.addLayout(chips)
         layout.addLayout(title_block, 1)
@@ -309,6 +321,19 @@ class CommandCenterTab(QWidget):
         chip_layout.addWidget(CaptionLabel(label, self))
         chip_layout.addWidget(StrongBodyLabel(value, self))
         return chip
+
+    def _build_bottom_status(self) -> QWidget:
+        panel = QFrame(self)
+        panel.setObjectName("commandStatusBar")
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(12)
+        layout.addWidget(CaptionLabel("Local/private mode", self))
+        layout.addWidget(CaptionLabel(f"Internet results max: {MAX_RESEARCH_RESULTS}", self))
+        layout.addWidget(CaptionLabel("Heavy actions require approval", self))
+        layout.addStretch()
+        layout.addWidget(CaptionLabel("Last action: ready", self))
+        return panel
 
     def _build_updates_panel(self) -> QWidget:
         panel = QFrame(self)
@@ -352,15 +377,15 @@ class CommandCenterTab(QWidget):
 
     def _build_action_panel(self) -> QWidget:
         panel = QFrame(self)
-        panel.setObjectName("commandPanelHero")
+        panel.setObjectName("commandPanel")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
         top = QHBoxLayout()
         title_block = QVBoxLayout()
-        title_block.addWidget(StrongBodyLabel("Mission Launcher", self))
-        title_block.addWidget(CaptionLabel("Plan work, queue approvals, or launch an approved browser task.", self))
+        title_block.addWidget(StrongBodyLabel("Command Composer", self))
+        title_block.addWidget(CaptionLabel("Give Princess a task. She can plan first, then act only when approved.", self))
         top.addLayout(title_block)
         top.addStretch()
         layout.addLayout(top)
@@ -395,7 +420,7 @@ class CommandCenterTab(QWidget):
 
         self.task_input = QTextEdit(self)
         self.task_input.setPlaceholderText(
-            "Describe the work. Example: find today's AI news, summarize it, then draft a LinkedIn post for approval."
+            "Ask Princess anything, or give her a task..."
         )
         self.task_input.setMinimumHeight(74)
         layout.addWidget(self.task_input)
@@ -457,16 +482,34 @@ class CommandCenterTab(QWidget):
             self.task_input.setPlainText(presets.get(target, ""))
         self.task_status.setText(f"{target} selected. Describe the mission or use the preset.")
 
+    def _use_prompt_chip(self, text: str):
+        prompts = {
+            "Summarize this PDF": "Summarize this PDF in clear sections and list the key ideas.",
+            "Explain this simply": "Explain this concept like I am new to it, with a simple example.",
+            "Research AI news": "Research the latest important AI news and summarize what matters.",
+            "Plan my day": "Help me plan my day around priorities, energy, and realistic time blocks.",
+            "Search my notes": "Search my local notes for this topic and explain the useful parts.",
+            "Compare ideas": "Compare these ideas with pros, cons, and a clear recommendation.",
+        }
+        self.talk_input.setText(prompts.get(text, text))
+        self.talk_input.setFocus()
+
     def _build_talk_panel(self) -> QWidget:
         panel = QFrame(self)
-        panel.setObjectName("commandPanelHero")
+        panel.setObjectName("commandPanelCore")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
 
         top = QHBoxLayout()
-        top.addWidget(StrongBodyLabel(f"Talk to {ASSISTANT_NAME}", self))
+        title_stack = QVBoxLayout()
+        title_stack.addWidget(StrongBodyLabel("Princess Core", self))
+        title_stack.addWidget(CaptionLabel("Chat, listen, think, speak, and keep the current mission in view.", self))
+        top.addLayout(title_stack)
         top.addStretch()
+        wake_text = f"Wake: {WAKE_WORD_PHRASE}" if WAKE_WORD_ENABLED else "Wake: off"
+        self.wake_status = CaptionLabel(wake_text, self)
+        top.addWidget(self.wake_status)
         self.speak_toggle = PushButton(FIF.VOLUME, "Speak on" if TTS_ENABLED and SPEAK_RESPONSES else "Speak off", self)
         self.speak_toggle.setCheckable(True)
         self.speak_toggle.setChecked(bool(TTS_ENABLED and SPEAK_RESPONSES))
@@ -474,16 +517,51 @@ class CommandCenterTab(QWidget):
         top.addWidget(self.speak_toggle)
         layout.addLayout(top)
 
+        core_status = QHBoxLayout()
+        core_status.setSpacing(8)
+        self.core_state_label = self._build_core_badge("State", "Ready")
+        self.core_voice_label = self._build_core_badge("Input", "Text + voice")
+        self.core_speech_label = self._build_core_badge(
+            "Speech",
+            "On" if TTS_ENABLED and SPEAK_RESPONSES else "Off",
+        )
+        core_status.addWidget(self.core_state_label)
+        core_status.addWidget(self.core_voice_label)
+        core_status.addWidget(self.core_speech_label)
+        layout.addLayout(core_status)
+
         self.talk_log = QTextEdit(self)
         self.talk_log.setReadOnly(True)
-        self.talk_log.setMinimumHeight(130)
-        self.talk_log.setPlaceholderText("Princess will keep the current Command Center conversation here.")
+        self.talk_log.setMinimumHeight(230)
+        self.talk_log.setObjectName("commandCoreLog")
+        self.talk_log.setPlaceholderText("Princess is ready. Ask a question, give a task, or use voice.")
         layout.addWidget(self.talk_log, 1)
 
+        chip_row = QHBoxLayout()
+        chip_row.setSpacing(8)
+        for text in [
+            "Summarize this PDF",
+            "Explain this simply",
+            "Research AI news",
+            "Plan my day",
+            "Search my notes",
+            "Compare ideas",
+        ]:
+            chip = PushButton(text, self)
+            chip.setObjectName("commandPromptChip")
+            chip.clicked.connect(lambda checked=False, value=text: self._use_prompt_chip(value))
+            chip_row.addWidget(chip)
+        layout.addLayout(chip_row)
+
         input_row = QHBoxLayout()
+        input_row.setSpacing(10)
         self.talk_input = LineEdit(self)
-        self.talk_input.setPlaceholderText("Tell Princess what you want to understand, learn, or do...")
+        self.talk_input.setObjectName("commandCoreInput")
+        self.talk_input.setPlaceholderText("Ask Princess anything, or give her a task...")
         self.talk_input.returnPressed.connect(self.send_talk_message)
+        self.talk_input.setClearButtonEnabled(True)
+        self.talk_input.setMinimumHeight(44)
+        self.talk_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         input_row.addWidget(self.talk_input, 1)
 
         self.talk_voice_btn = PushButton(FIF.MICROPHONE, "Talk", self)
@@ -497,6 +575,85 @@ class CommandCenterTab(QWidget):
 
         self.talk_status = CaptionLabel("Ready to listen.", self)
         layout.addWidget(self.talk_status)
+        return panel
+
+    def _build_core_badge(self, label: str, value: str) -> QWidget:
+        badge = QFrame(self)
+        badge.setObjectName("commandCoreBadge")
+        badge_layout = QVBoxLayout(badge)
+        badge_layout.setContentsMargins(10, 6, 10, 6)
+        badge_layout.setSpacing(1)
+        badge_layout.addWidget(CaptionLabel(label, self))
+        badge_layout.addWidget(StrongBodyLabel(value, self))
+        return badge
+
+    def _build_right_rail(self) -> QWidget:
+        rail = QWidget(self)
+        layout = QVBoxLayout(rail)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        layout.addWidget(self._build_active_mission_panel())
+        layout.addWidget(self._build_knowledge_panel())
+        layout.addWidget(self._build_approvals_panel(), 1)
+        return rail
+
+    def _build_active_mission_panel(self) -> QWidget:
+        panel = QFrame(self)
+        panel.setObjectName("commandPanelFun")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+        layout.addWidget(StrongBodyLabel("Active Mission", self))
+        self.mission_state = CaptionLabel("Idle. Waiting for your next instruction.", self)
+        self.mission_state.setWordWrap(True)
+        layout.addWidget(self.mission_state)
+        for label in ["Listening", "Thinking", "Searching", "Reading", "Approval"]:
+            row, value_label = self._build_mission_row(label, "standby", return_value=True)
+            self.mission_rows[label] = value_label
+            layout.addWidget(row)
+        return panel
+
+    def _build_mission_row(self, label: str, value: str, return_value: bool = False):
+        row = QFrame(self)
+        row.setObjectName("commandMiniRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(8, 5, 8, 5)
+        row_layout.addWidget(BodyLabel(label, self))
+        row_layout.addStretch()
+        value_label = CaptionLabel(value, self)
+        row_layout.addWidget(value_label)
+        if return_value:
+            return row, value_label
+        return row
+
+    def _build_knowledge_panel(self) -> QWidget:
+        panel = QFrame(self)
+        panel.setObjectName("commandPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+        layout.addWidget(StrongBodyLabel("Knowledge Library", self))
+        layout.addWidget(CaptionLabel("Local books, notes, PDFs, and data stay on this machine.", self))
+
+        self.knowledge_search = LineEdit(self)
+        self.knowledge_search.setPlaceholderText("Ask about your books or notes...")
+        layout.addWidget(self.knowledge_search)
+
+        files = [
+            path.name
+            for path in sorted(self.knowledge_dir.iterdir())
+            if path.is_file()
+        ][:5]
+        if files:
+            for name in files:
+                layout.addWidget(self._build_mission_row(name, "local"))
+        else:
+            layout.addWidget(CaptionLabel("No indexed files yet.", self))
+
+        add_btn = PushButton(FIF.ADD, "Add Files", self)
+        add_btn.setEnabled(False)
+        layout.addWidget(add_btn)
+        layout.addWidget(CaptionLabel("Indexer shell ready. Full ingestion comes next.", self))
         return panel
 
     def _build_draft_panel(self) -> QWidget:
@@ -572,7 +729,8 @@ class CommandCenterTab(QWidget):
         daily = "daily permission required" if DAILY_PERMISSION_REQUIRED else "daily permission optional"
         approval = "posting approval required" if SOCIAL_ACTIONS_REQUIRE_APPROVAL else "posting approval off"
         posting = "connectors disabled" if not SOCIAL_POSTING_ENABLED else "connectors enabled"
-        return f"{daily} | {approval} | {posting}"
+        internet = "internet approval required" if INTERNET_REQUIRES_APPROVAL else "internet approval optional"
+        return f"{daily} | {approval} | {posting} | {internet}"
 
     def load_updates(self):
         self.refresh_btn.setEnabled(False)
@@ -590,6 +748,8 @@ class CommandCenterTab(QWidget):
         self.updates_status.setText(
             f"{len(self.all_updates)} updates loaded." if self.all_updates else "No updates available."
         )
+        if hasattr(self, "mission_state"):
+            self.mission_state.setText("Signal Radar refreshed. Local chat stayed available.")
         self.render_updates()
 
     def render_updates(self):
@@ -714,15 +874,18 @@ class CommandCenterTab(QWidget):
     def _toggle_command_speech(self):
         enabled = self.speak_toggle.isChecked()
         self.speak_toggle.setText("Speak on" if enabled else "Speak off")
+        self._set_core_badge(self.core_speech_label, "Speech", "On" if enabled else "Off")
         try:
             if not tts.toggle(enabled):
                 self.speak_toggle.setChecked(False)
                 self.speak_toggle.setText("Speak off")
+                self._set_core_badge(self.core_speech_label, "Speech", "Off")
                 self.talk_status.setText("Speech is unavailable, but text still works.")
                 return
         except Exception as exc:
             self.speak_toggle.setChecked(False)
             self.speak_toggle.setText("Speak off")
+            self._set_core_badge(self.core_speech_label, "Speech", "Off")
             self.talk_status.setText(f"Speech warning: {exc}")
 
     def send_talk_message(self):
@@ -732,6 +895,11 @@ class CommandCenterTab(QWidget):
         self.talk_input.clear()
         self._append_talk("You", text)
         self._set_talk_busy(True)
+        if hasattr(self, "mission_state"):
+            self.mission_state.setText("Thinking through your request locally.")
+        self._set_mission_status("Thinking", "active")
+        self._set_mission_status("Listening", "standby")
+        self._set_core_badge(self.core_state_label, "State", "Thinking")
         self._talk_worker = TalkWorker(text, self.command_messages, self.speak_toggle.isChecked())
         self._talk_worker.status_update.connect(self.talk_status.setText)
         self._talk_worker.response_ready.connect(self._on_talk_response)
@@ -745,10 +913,25 @@ class CommandCenterTab(QWidget):
     def _on_talk_response(self, answer: str, messages: object):
         self.command_messages = list(messages)
         self._append_talk(ASSISTANT_NAME, answer)
-        self.talk_status.setText("Understood. I kept this in the current conversation.")
+        self._set_mission_status("Thinking", "done")
+        if self.speak_toggle.isChecked():
+            self.talk_status.setText("Response ready. Speaking is queued.")
+            if hasattr(self, "mission_state"):
+                self.mission_state.setText("Speaking response while text remains available.")
+            self._set_core_badge(self.core_state_label, "State", "Speaking")
+            QTimer.singleShot(2500, lambda: self._set_core_badge(self.core_state_label, "State", "Ready"))
+        else:
+            self.talk_status.setText("Understood. I kept this in the current conversation.")
+            if hasattr(self, "mission_state"):
+                self.mission_state.setText("Response ready. Waiting for your next instruction.")
+            self._set_core_badge(self.core_state_label, "State", "Ready")
 
     def _on_talk_error(self, error: str):
         self.talk_status.setText("I could not respond, but the rest of Command Center is still available.")
+        if hasattr(self, "mission_state"):
+            self.mission_state.setText("The last response failed. Text, voice, and local controls remain available.")
+        self._set_mission_status("Thinking", "error")
+        self._set_core_badge(self.core_state_label, "State", "Ready")
         self._warn(f"Talk failed: {error}")
 
     def _on_talk_finished(self):
@@ -758,7 +941,8 @@ class CommandCenterTab(QWidget):
     def _set_talk_busy(self, busy: bool):
         self.talk_send_btn.setEnabled(not busy)
         self.talk_voice_btn.setEnabled(not busy and self._voice_thread is None)
-        self.talk_input.setEnabled(not busy)
+        self.talk_input.setEnabled(True)
+        self.talk_input.setReadOnly(False)
         if not busy:
             self.talk_input.setFocus()
 
@@ -772,6 +956,12 @@ class CommandCenterTab(QWidget):
             return
 
         self.talk_status.setText("Listening for your command...")
+        if hasattr(self, "mission_state"):
+            self.mission_state.setText("Listening through push-to-talk.")
+        self._set_mission_status("Listening", "active")
+        self._set_core_badge(self.core_state_label, "State", "Listening")
+        self.talk_input.setEnabled(True)
+        self.talk_input.setReadOnly(False)
         self.talk_voice_btn.setEnabled(False)
         self._voice_thread = QThread(self)
         self._voice_worker = VoiceInputWorker()
@@ -789,16 +979,38 @@ class CommandCenterTab(QWidget):
     def _on_voice_transcript(self, text: str):
         self.talk_input.setText(text)
         self.talk_status.setText(f"Heard: {text}")
+        if hasattr(self, "mission_state"):
+            self.mission_state.setText("Voice captured. Sending it as a normal text command.")
+        self._set_mission_status("Listening", "done")
         self.send_talk_message()
 
     def _on_voice_error(self, error: str):
         self.talk_status.setText("I could not understand that. Try again or type it.")
+        if hasattr(self, "mission_state"):
+            self.mission_state.setText("Voice capture failed. Text input is still available.")
+        self._set_mission_status("Listening", "error")
+        self._set_core_badge(self.core_state_label, "State", "Ready")
         self._warn(f"Voice input failed: {error}")
 
     def _on_voice_finished(self):
         self._voice_worker = None
         self._voice_thread = None
         self.talk_voice_btn.setEnabled(self._talk_worker is None)
+        self.talk_input.setEnabled(True)
+        self.talk_input.setReadOnly(False)
+        if self._talk_worker is None:
+            self._set_core_badge(self.core_state_label, "State", "Ready")
+
+    def _set_core_badge(self, badge: QWidget, label: str, value: str):
+        labels = badge.findChildren(QLabel)
+        if len(labels) >= 2:
+            labels[0].setText(label)
+            labels[1].setText(value)
+
+    def _set_mission_status(self, label: str, value: str):
+        status_label = self.mission_rows.get(label)
+        if status_label:
+            status_label.setText(value)
 
     def generate_draft(self):
         topic = self.topic_input.text().strip()
