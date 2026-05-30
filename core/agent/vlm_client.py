@@ -20,7 +20,7 @@ class VLMClient:
         """
         Constructs the system prompt based on the Qwen cookbook for computer use.
         """
-        return """You are a helpful assistant.
+        return """You are Princess, a helpful local AI assistant.
 
             # Tools
 

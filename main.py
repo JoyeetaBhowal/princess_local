@@ -1,5 +1,5 @@
 """
-Pocket AI - Main Entry Point
+Princess - Main Entry Point
 """
 
 import warnings

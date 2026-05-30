@@ -10,7 +10,8 @@ from typing import Optional
 from PySide6.QtCore import QObject, Signal
 
 from config import (
-    RESPONDER_MODEL, OLLAMA_URL, MAX_HISTORY, GRAY, RESET, CYAN, GREEN, WAKE_WORD
+    ASSISTANT_SYSTEM_PROMPT, RESPONDER_MODEL, OLLAMA_URL, MAX_HISTORY,
+    GRAY, RESET, CYAN, GREEN, WAKE_WORD
 )
 from core.stt import STTListener
 from core.llm import route_query, should_bypass_router, http_session
@@ -47,7 +48,7 @@ class VoiceAssistant(QObject):
         self.messages = [
             {
                 'role': 'system', 
-                'content': 'You are a helpful assistant. Respond in short, complete sentences. Never use emojis or special characters. Keep responses concise and conversational.'
+                'content': ASSISTANT_SYSTEM_PROMPT
             }
         ]
         self.current_session_id = None
@@ -120,7 +121,7 @@ class VoiceAssistant(QObject):
             return
         
         # Remove wake word from text if present
-        text = text.lower().replace("ada", "").strip()
+        text = text.lower().replace(WAKE_WORD, "").strip()
         if not text:
             return
         

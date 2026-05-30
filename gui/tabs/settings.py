@@ -2,7 +2,7 @@
 Comprehensive Settings Tab with model selection, connection settings, and preferences.
 """
 
-from config import LOCAL_ROUTER_PATH, RESPONDER_MODEL
+from config import ASSISTANT_NAME, LOCAL_ROUTER_PATH, RESPONDER_MODEL
 
 import requests
 from PySide6.QtWidgets import (
@@ -486,7 +486,7 @@ class SettingsTab(ScrollArea):
         self.about_card = PrimaryPushSettingCard(
             "Check Update",
             FIF.INFO,
-            "About A.D.A",
+            f"About {ASSISTANT_NAME}",
             "Version 0.2.0 (Alpha)",
             self.about_group
         )

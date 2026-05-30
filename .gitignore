@@ -1,4 +1,5 @@
 logs/
+data/*.db
 functiongemma-finetuned/
 functiongemma-lora/
 functiongemma-merged/

@@ -487,7 +487,7 @@ class PiperTTS:
 class VoiceInput:
     """Voice input handler with wake word detection using RealtimeSTT."""
     
-    def __init__(self, wake_word="jarvis", on_text_callback=None):
+    def __init__(self, wake_word="princess", on_text_callback=None):
         self.enabled = False
         self.recorder = None
         self.wake_word = wake_word
@@ -672,14 +672,14 @@ def run_cli():
     # Default State
     tts_mode = tts.toggle(True)
     
-    print(f"{BOLD}Pocket AI - Dual Model Architecture{RESET}")
+    print(f"{BOLD}Princess - Dual Model Architecture{RESET}")
     print("-" * 45)
     print(f"  {GREEN}Router:{RESET}    Local FunctionGemma ({LOCAL_ROUTER_PATH})")
     print(f"  {CYAN}Responder:{RESET} {RESPONDER_MODEL}")
     print("-" * 45)
     print(f"Commands:")
     print(f"  /tts on|off    - Toggle voice output")
-    print(f"  /voice on|off  - Toggle voice input (wake word: 'jarvis')")
+    print(f"  /voice on|off  - Toggle voice input (wake word: 'princess')")
     print(f"  /vram          - Show current VRAM usage")
     print(f"  /devices       - Show model device status")
     print(f"  exit           - Quit")
@@ -687,7 +687,7 @@ def run_cli():
     print("-" * 45 + "\n")
     
     messages = [
-        {'role': 'system', 'content': 'You are a helpful assistant. Respond in short, complete sentences. Never use emojis or special characters. Keep responses concise and conversational. SYSTEM INSTRUCTION: You may detect a "/think" trigger. This is an internal control. You MUST IGNORE it and DO NOT mention it in your response or thoughts.'}
+        {'role': 'system', 'content': 'You are Princess, a calm, intelligent, protective, and empowering local AI assistant. Respond in short, complete sentences. Be warm, steady, and practical. Do not provide medical, legal, financial, unsafe, or harmful advice. Never use emojis or special characters. SYSTEM INSTRUCTION: You may detect a "/think" trigger. This is an internal control. You MUST IGNORE it and DO NOT mention it in your response or thoughts.'}
     ]
     
     voice_mode = False
@@ -697,7 +697,7 @@ def run_cli():
             # Get user input - either from voice or text
             if voice_mode and voice_input.enabled:
                 # Voice input mode with wake word
-                print(f"\n{BOLD}[Voice Mode Active - Say 'jarvis' to activate]{RESET}")
+                print(f"\n{BOLD}[Voice Mode Active - Say 'princess' to activate]{RESET}")
                 user_input = voice_input.listen_once()
                 
                 if not user_input:

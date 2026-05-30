@@ -17,7 +17,10 @@ from gui.handlers import ChatHandlers
 from core.model_manager import unload_all_models
 from core.voice_assistant import voice_assistant
 from core.tts import tts
-from config import VOICE_ASSISTANT_ENABLED, GREEN, RESET
+from config import (
+    ASSISTANT_NAME, ROUTER_ENABLED, VOICE_ASSISTANT_ENABLED,
+    WAKE_WORD_ENABLED, WAKE_WORD_PHRASE, GREEN, GRAY, RESET
+)
 
 from gui.styles import AURA_STYLESHEET 
 
@@ -27,6 +30,7 @@ from gui.tabs.planner import PlannerTab
 from gui.tabs.settings import SettingsTab
 from gui.tabs.briefing import BriefingView
 from gui.tabs.browser import BrowserTab
+from gui.tabs.command_center import CommandCenterTab
 from gui.tabs.home_automation import HomeAutomationTab
 from gui.components.system_monitor import SystemMonitor
 from gui.components.voice_indicator import VoiceIndicator
@@ -61,7 +65,7 @@ class MainWindow(FluentWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("A.D.A")
+        self.setWindowTitle(ASSISTANT_NAME)
         self.setMinimumSize(1100, 750)
         self.resize(1200, 800)
         
@@ -79,15 +83,19 @@ class MainWindow(FluentWindow):
         self.chat_tab = None
         self.planner_tab = None
         self.briefing_view = None
+        self.command_center_tab = None
         self.home_tab = None
+        self.browser_tab = None
         
         # Flag to prevent duplicate signal connections
         self._chat_signals_connected = False
+        self._command_center_signals_connected = False
 
         self._init_window()
         self._connect_signals()
         self._init_background()
-        self._preload_models()
+        if ROUTER_ENABLED:
+            self._preload_models()
         self._init_voice_assistant()
         
     def _preload_models(self):
@@ -97,8 +105,14 @@ class MainWindow(FluentWindow):
     
     def _init_voice_assistant(self):
         """Initialize and start voice assistant if enabled."""
-        print(f"[App] Initializing voice assistant (enabled={VOICE_ASSISTANT_ENABLED})...")
-        if VOICE_ASSISTANT_ENABLED:
+        print(
+            f"[App] Initializing voice assistant "
+            f"(voice={VOICE_ASSISTANT_ENABLED}, wake_word={WAKE_WORD_ENABLED})..."
+        )
+        if VOICE_ASSISTANT_ENABLED and WAKE_WORD_ENABLED:
+            print(f"[App] Starting local wake-word listener for '{WAKE_WORD_PHRASE}'...")
+            self.handlers.start_wake_word_listener()
+            return
             # Connect voice assistant signals to UI
             print(f"[App] Connecting voice assistant signals...")
             voice_assistant.wake_word_detected.connect(self._on_wake_word_detected)
@@ -127,13 +141,15 @@ class MainWindow(FluentWindow):
                     print(f"[App] Background thread: ✗ Failed to initialize voice assistant")
             
             threading.Thread(target=init_va, daemon=True).start()
+        elif VOICE_ASSISTANT_ENABLED:
+            print("[App] Push-to-talk enabled; wake-word listener remains disabled.")
         else:
-            print(f"[App] Voice assistant disabled in config")
+            print("[App] Voice assistant disabled in config")
     
     def _on_wake_word_detected(self):
         """Handle wake word detection - show listening indicator."""
         print(f"{GREEN}[App] ✓ Wake word signal received in UI thread!{RESET}")
-        if VOICE_ASSISTANT_ENABLED:
+        if VOICE_ASSISTANT_ENABLED and WAKE_WORD_ENABLED:
             print(f"{GREEN}[App] Showing voice indicator...{RESET}")
             # Use system monitor's simple indicator instead of overlay
             self.system_monitor.show_listening()
@@ -148,7 +164,7 @@ class MainWindow(FluentWindow):
     
     def _on_processing_finished(self):
         """Handle processing finished - hide listening indicator."""
-        if VOICE_ASSISTANT_ENABLED:
+        if VOICE_ASSISTANT_ENABLED and WAKE_WORD_ENABLED:
             # Small delay before hiding
             from PySide6.QtCore import QTimer
             QTimer.singleShot(500, lambda: self.system_monitor.hide_listening())
@@ -214,8 +230,10 @@ class MainWindow(FluentWindow):
 
         self.home_lazy = LazyTab(HomeAutomationTab, "homeInterface")
         self.browser_lazy = LazyTab(BrowserTab, "browserInterface")
+        self.command_center_lazy = LazyTab(CommandCenterTab, "commandCenterInterface")
         
         self.addSubInterface(self.chat_lazy, FIF.CHAT, "Chat")
+        self.addSubInterface(self.command_center_lazy, FIF.ROBOT, "Command Center")
         self.addSubInterface(self.planner_lazy, FIF.CALENDAR, "Planner")
         self.addSubInterface(self.briefing_view, FIF.DATE_TIME, "Briefing")
         self.addSubInterface(self.home_lazy, FIF.HOME, "Home Auto")
@@ -239,6 +257,7 @@ class MainWindow(FluentWindow):
         self._chat_signals_connected = True
         self.chat_tab.new_chat_requested.connect(self.handlers.clear_chat)
         self.chat_tab.send_message_requested.connect(self._on_send)
+        self.chat_tab.voice_input_requested.connect(self.handlers.listen_for_voice_input)
         self.chat_tab.stop_generation_requested.connect(self.handlers.stop_generation)
         self.chat_tab.tts_toggled.connect(self.handlers.toggle_tts)
         self.chat_tab.session_selected.connect(self._on_session_clicked)
@@ -295,13 +314,35 @@ class MainWindow(FluentWindow):
                 self.planner_tab = real_widget
             elif obj_name == "briefingInterface":
                 self.briefing_view = real_widget
+            elif obj_name == "commandCenterInterface":
+                self.command_center_tab = real_widget
+                self._connect_command_center_signals()
             elif obj_name == "homeInterface":
                 self.home_tab = real_widget
             elif obj_name == "browserInterface":
-                # No signals to connect for browser yet
-                pass
+                self.browser_tab = real_widget
                 
         self.set_status("Ready")
+
+    def _connect_command_center_signals(self):
+        """Connect Command Center signals once when the lazy tab is initialized."""
+        if not self.command_center_tab or self._command_center_signals_connected:
+            return
+        self._command_center_signals_connected = True
+        if hasattr(self.command_center_tab, "browser_task_requested"):
+            self.command_center_tab.browser_task_requested.connect(self._run_browser_task)
+
+    def _run_browser_task(self, instruction: str):
+        """Open the Web Agent tab and start an explicitly requested browser task."""
+        if not instruction.strip():
+            return
+        if not self.browser_tab:
+            self.browser_tab = self.browser_lazy.initialize()
+        self.switchTo(self.browser_lazy)
+        if hasattr(self.browser_tab, "url_input"):
+            self.browser_tab.url_input.setText(instruction)
+        if hasattr(self.browser_tab, "_on_execute"):
+            self.browser_tab._on_execute()
     
     def _navigate_to_tab(self, route_key: str):
         """Navigate to a tab by its object name (route key)."""
@@ -322,6 +363,9 @@ class MainWindow(FluentWindow):
     
     def set_generating_state(self, is_generating: bool):
         if self.chat_tab: self.chat_tab.set_generating_state(is_generating)
+
+    def set_voice_listening_state(self, is_listening: bool):
+        if self.chat_tab: self.chat_tab.set_voice_listening_state(is_listening)
     
     def add_message_bubble(self, role: str, text: str, is_thinking: bool = False):
         if self.chat_tab: self.chat_tab.add_message_bubble(role, text, is_thinking)
@@ -344,8 +388,8 @@ class MainWindow(FluentWindow):
         self.set_status("Closing...")
         
         # Stop voice assistant
-        if VOICE_ASSISTANT_ENABLED:
-            voice_assistant.stop()
+        if VOICE_ASSISTANT_ENABLED and WAKE_WORD_ENABLED:
+            self.handlers.stop_wake_word_listener()
         
         unload_all_models(sync=True)
         event.accept()

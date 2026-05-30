@@ -1,10 +1,10 @@
-# 🤖 A.D.A - Pocket AI
+# 🤖 Princess - Local AI Assistant
 
 <p align="center">
-  <img src="gui/assets/logo.png" alt="A.D.A Logo" width="120" height="120">
+  <img src="gui/assets/logo.png" alt="Princess Logo" width="120" height="120">
 </p>
 
-**A.D.A** (Advanced Digital Assistant) is a **fully local, privacy-focused AI assistant** for Windows. It combines a beautiful modern GUI with powerful voice control capabilities—all running entirely on YOUR computer with no cloud dependency.
+**Princess** is a **fully local, privacy-focused AI assistant** for Windows. It combines a beautiful modern GUI with powerful voice control capabilities—all running entirely on YOUR computer with no cloud dependency.
 
 > 🔒 **Your data stays on your machine.** No API keys required for core functionality. No subscriptions. No data collection.
 
@@ -14,7 +14,7 @@
 
 | Feature | Description |
 |---------|-------------|
-| 🎤 **Voice Control** | Wake word detection ("Jarvis") with natural language commands |
+| 🎤 **Voice Control** | Wake word detection ("Princess") with natural language commands |
 | 💬 **AI Chat** | Interactive chat with local LLMs via Ollama with streaming responses |
 | 🏠 **Smart Home** | Control TP-Link Kasa smart lights and plugs from the app |
 | 📅 **Planner** | Manage calendar events, alarms, and timers |
@@ -35,6 +35,9 @@
 
 Before you begin, make sure you have:
 
+> Developer note: If you want to copy, customize, or extend this project, see
+> [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md).
+
 ### Required Software
 
 | Software | Purpose | Download |
@@ -53,7 +56,7 @@ Before you begin, make sure you have:
 
 ## 🚀 Quick Start Guide
 
-Follow these steps to get A.D.A running on your system.
+Follow these steps to get Princess running on your system.
 
 ### Step 1: Install Miniconda
 
@@ -95,14 +98,14 @@ ollama list
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/pocket_ai.git
-cd pocket_ai
+git clone https://github.com/nazirlouis/ada_local.git
+cd ada_local
 
 # Create a conda environment
-conda create -n ada python=3.11 -y
+conda create -n princess python=3.11 -y
 
 # Activate the environment
-conda activate ada
+conda activate princess
 
 # Install dependencies
 pip install -r requirements.txt
@@ -132,13 +135,13 @@ python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 python main.py
 ```
 
-🎉 **That's it!** A.D.A will launch with a beautiful GUI.
+🎉 **That's it!** Princess will launch with a beautiful GUI.
 
 ---
 
 ## 🎮 GPU Acceleration
 
-A.D.A benefits greatly from GPU acceleration. Here's what runs on your GPU:
+Princess benefits greatly from GPU acceleration. Here's what runs on your GPU:
 
 | Component | GPU Benefit | Without GPU |
 |-----------|-------------|-------------|
@@ -177,31 +180,31 @@ The following models are **downloaded automatically** on first run—no manual s
 
 ## 🎙️ Voice Assistant Setup
 
-A.D.A includes Alexa-like voice control with wake word detection.
+Princess includes Alexa-like voice control with wake word detection.
 
 ### How It Works
 
-1. Say **"Jarvis"** to wake the assistant
+1. Say **"Princess"** to wake the assistant
 2. Speak your command naturally
-3. A.D.A processes your request and responds
+3. Princess processes your request and responds
 
 ### Example Voice Commands
 
 | Command | What It Does |
 |---------|--------------|
-| *"Jarvis, turn on the office lights"* | Controls smart lights |
-| *"Jarvis, set a timer for 10 minutes"* | Creates a countdown timer |
-| *"Jarvis, what's on my schedule today?"* | Reads your calendar |
-| *"Jarvis, search the web for Python tutorials"* | Performs web search |
-| *"Jarvis, add buy groceries to my to-do list"* | Creates a task |
+| *"Princess, turn on the office lights"* | Controls smart lights |
+| *"Princess, set a timer for 10 minutes"* | Creates a countdown timer |
+| *"Princess, what's on my schedule today?"* | Reads your calendar |
+| *"Princess, search the web for Python tutorials"* | Performs web search |
+| *"Princess, add buy groceries to my to-do list"* | Creates a task |
 
 ### Voice Configuration
 
 Edit `config.py` to customize:
 
 ```python
-# Change wake word (default: "jarvis")
-WAKE_WORD = "jarvis"
+# Change wake word (default: "princess")
+WAKE_WORD = "princess"
 
 # Adjust sensitivity (0.0-1.0, lower = less false positives)
 WAKE_WORD_SENSITIVITY = 0.4
@@ -329,7 +332,7 @@ pocket_ai/
 
 ## 🏠 Smart Home Integration
 
-A.D.A supports **TP-Link Kasa** smart devices:
+Princess supports **TP-Link Kasa** smart devices:
 
 ### Supported Devices
 
@@ -340,7 +343,7 @@ A.D.A supports **TP-Link Kasa** smart devices:
 ### Setup
 
 1. Ensure your Kasa devices are on the same network as your computer
-2. Open A.D.A and go to the **Home Automation** tab
+2. Open Princess and go to the **Home Automation** tab
 3. Click **Refresh** to scan for devices
 4. Control devices through the GUI or voice commands
 

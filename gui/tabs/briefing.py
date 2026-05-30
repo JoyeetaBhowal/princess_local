@@ -2,6 +2,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 )
 from PySide6.QtCore import Qt, QThread, Signal
+import random
 from gui.components.news_card import NewsCard
 from core.news import news_manager
 
@@ -19,7 +20,7 @@ class NewsLoaderThread(QThread):
         self.use_ai = use_ai
 
     def run(self):
-        news = news_manager.get_briefing(status_callback=self.status_update.emit, use_ai=self.use_ai)
+        news = news_manager.get_categorized_updates(status_callback=self.status_update.emit, limit_per_category=5)
         self.loaded.emit(news)
 
 class BriefingView(QWidget):
@@ -29,6 +30,7 @@ class BriefingView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("briefingView")
+        self.all_news_items = []
         
         # Main Layout
         self.layout = QVBoxLayout(self)
@@ -49,6 +51,11 @@ class BriefingView(QWidget):
         
         header_layout.addStretch()
         
+        # Shuffle Button
+        shuffle_btn = PushButton(FIF.ROTATE, "Shuffle")
+        shuffle_btn.clicked.connect(self.shuffle_news)
+        header_layout.addWidget(shuffle_btn)
+
         # Refresh Button
         refresh_btn = PushButton(FIF.SYNC, "Refresh")
         refresh_btn.clicked.connect(lambda: self.load_news(use_ai=True))
@@ -76,13 +83,12 @@ class BriefingView(QWidget):
         # Category Filters (SegmentedWidget)
         self.pivot = SegmentedWidget()
         
-        categories = ["Top Stories", "Technology", "Markets", "Science", "Culture"]
+        categories = ["All", "Top Stories", "Technology", "Markets", "Science", "Culture", "Trending"]
         for c in categories:
             self.pivot.addItem(routeKey=c, text=c)
             
-        self.pivot.setCurrentItem("Top Stories")
-        # Connect signal later if implementing filtering
-        # self.pivot.currentItemChanged.connect(self._on_category_changed)
+        self.pivot.setCurrentItem("All")
+        self.pivot.currentItemChanged.connect(lambda _: self.render_news())
         
         self.layout.addWidget(self.pivot)
         
@@ -134,12 +140,35 @@ class BriefingView(QWidget):
                 parent=self
             )
             return
-            
+
+        self.all_news_items = news_items
+        self.render_news()
+
+    def render_news(self):
+        while self.news_list_layout.count():
+            item = self.news_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        selected = self.pivot.currentRouteKey()
+        news_items = [
+            item for item in self.all_news_items
+            if selected == "All" or item.get("category") == selected
+        ]
+
         if news_items:
             first = news_items[0]
-            self.bk_text.setText(f"{first['title']} ({first['source']})")
-        
+            self.bk_text.setText(f"{first.get('title')} ({first.get('source')})")
+        else:
+            self.bk_text.setText(f"No {selected.lower()} stories loaded yet.")
+
         # Populate List
         for item in news_items:
             card = NewsCard(item)
             self.news_list_layout.addWidget(card)
+
+    def shuffle_news(self):
+        if not self.all_news_items:
+            return
+        random.shuffle(self.all_news_items)
+        self.render_news()

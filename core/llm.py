@@ -7,6 +7,7 @@ import threading
 
 from config import (
     RESPONDER_MODEL, OLLAMA_URL, LOCAL_ROUTER_PATH,
+    ROUTER_ENABLED, VOICE_ASSISTANT_ENABLED,
     GRAY, RESET
 )
 
@@ -24,9 +25,7 @@ def is_router_loaded():
 
 def should_bypass_router(text):
     """Return True if text definitely doesn't need routing."""
-    # All queries now go through Function Gemma router
-    # This function is kept for compatibility but always returns False
-    return False
+    return not ROUTER_ENABLED
 
 
 def route_query(user_input):
@@ -132,9 +131,11 @@ def preload_models():
         tts.initialize()
 
     # Create threads
-    threads.append(threading.Thread(target=load_router))
+    if ROUTER_ENABLED:
+        threads.append(threading.Thread(target=load_router))
     threads.append(threading.Thread(target=load_responder))
-    threads.append(threading.Thread(target=load_voice))
+    if VOICE_ASSISTANT_ENABLED:
+        threads.append(threading.Thread(target=load_voice))
 
     # Start all
     for t in threads:

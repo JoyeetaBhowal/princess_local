@@ -1,6 +1,8 @@
 import json
 import requests
 import datetime
+import xml.etree.ElementTree as ET
+from urllib.parse import quote_plus
 from duckduckgo_search import DDGS
 from config import OLLAMA_URL, RESPONDER_MODEL
 
@@ -12,6 +14,14 @@ class NewsManager:
         # Simple in-memory cache: {category: {"timestamp": dt, "data": []}}
         self.cache = {}
         self.cache_duration = datetime.timedelta(minutes=15)
+        self.category_queries = {
+            "Top Stories": "top news today",
+            "Technology": "technology AI cybersecurity news today",
+            "Markets": "business markets economy news today",
+            "Science": "science health space breakthrough news today",
+            "Culture": "culture entertainment media news today",
+            "Trending": "trending topics social media today",
+        }
 
     def get_briefing(self, status_callback=None, use_ai: bool = True) -> list:
         """
@@ -69,6 +79,79 @@ class NewsManager:
         
         return curated_news
 
+    def get_categorized_updates(
+        self,
+        status_callback=None,
+        limit_per_category: int = 4,
+    ) -> list:
+        """Fetch current headlines and trends grouped for the command center."""
+        cache_key = f"categorized_{limit_per_category}"
+        if status_callback:
+            status_callback("Checking local cache...")
+
+        cached = self._get_from_cache(cache_key)
+        if cached:
+            return cached
+
+        raw_news = []
+        try:
+            for category, query in self.category_queries.items():
+                if status_callback:
+                    status_callback(f"Fetching {category.lower()}...")
+
+                for result in self.ddgs.news(query, max_results=limit_per_category):
+                    result["category"] = category
+                    raw_news.append(result)
+        except Exception as e:
+            print(f"Error fetching categorized updates from DDGS: {e}")
+            raw_news = self._fetch_rss_fallback(status_callback, limit_per_category)
+
+        if not raw_news:
+            return []
+
+        formatted = self._format_raw_fallback(raw_news, max_items=limit_per_category * 6)
+        self.cache[cache_key] = {
+            "timestamp": datetime.datetime.now(),
+            "data": formatted,
+        }
+        return formatted
+
+    def _fetch_rss_fallback(self, status_callback=None, limit_per_category: int = 4) -> list:
+        """Use public RSS as a fallback when DDGS rate limits or fails."""
+        raw_news = []
+        headers = {"User-Agent": "PrincessLocalAssistant/1.0"}
+
+        for category, query in self.category_queries.items():
+            if status_callback:
+                status_callback(f"Fetching {category.lower()} RSS...")
+
+            url = (
+                "https://news.google.com/rss/search?"
+                f"q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
+            )
+
+            try:
+                response = requests.get(url, headers=headers, timeout=20)
+                response.raise_for_status()
+                root = ET.fromstring(response.content)
+                for item in root.findall(".//item")[:limit_per_category]:
+                    raw_news.append({
+                        "title": self._xml_text(item, "title"),
+                        "source": self._xml_text(item, "source") or "Google News",
+                        "date": self._xml_text(item, "pubDate"),
+                        "category": category,
+                        "url": self._xml_text(item, "link"),
+                        "image": None,
+                    })
+            except Exception as exc:
+                print(f"RSS fallback failed for {category}: {exc}")
+
+        return raw_news
+
+    def _xml_text(self, item, tag: str) -> str:
+        found = item.find(tag)
+        return found.text.strip() if found is not None and found.text else ""
+
     def _get_from_cache(self, key: str):
         if key in self.cache:
             entry = self.cache[key]
@@ -76,7 +159,7 @@ class NewsManager:
                 return entry["data"]
         return None
 
-    def _format_raw_fallback(self, raw_news):
+    def _format_raw_fallback(self, raw_news, max_items: int = 8):
         """Fallback formatting if AI fails."""
         formatted = []
         seen_titles = set()
@@ -94,7 +177,7 @@ class NewsManager:
                 "url": item.get('url'),
                 "image": item.get('image') # DDGS might return 'image'
             })
-        return formatted[:8] # Return top 8
+        return formatted[:max_items]
 
     def _curate_with_ai(self, raw_news):
         """Send raw news to LLM to select and strictly format."""

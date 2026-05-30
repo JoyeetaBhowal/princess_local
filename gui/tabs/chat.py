@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, 
-    QListWidgetItem, QSizePolicy, QMenu
+    QListWidgetItem, QSizePolicy, QMenu, QMessageBox
 )
 from PySide6.QtCore import Qt, QSize, QTimer, Signal
 from PySide6.QtGui import QFont, QIcon, QColor
@@ -15,6 +15,7 @@ from gui.components.message_bubble import MessageBubble
 from gui.components import ThinkingExpander
 # We will replace local ToggleSwitch with qfluentwidgets.SwitchButton
 from core.history import history_manager
+from config import ASSISTANT_NAME, TEXT_CHAT_ENABLED, TTS_ENABLED, SPEAK_RESPONSES
 
 
 class ChatTab(QWidget):
@@ -27,6 +28,7 @@ class ChatTab(QWidget):
     send_message_requested = Signal(str)
     stop_generation_requested = Signal()
     tts_toggled = Signal(bool)
+    voice_input_requested = Signal()
     new_chat_requested = Signal()
     session_selected = Signal(str)
     
@@ -57,8 +59,15 @@ class ChatTab(QWidget):
         sidebar_layout.setSpacing(10)
 
         # New Chat Button
-        self.new_chat_btn = PushButton(FIF.ADD, "New Chat")
+        self.new_chat_btn = PrimaryPushButton(FIF.ADD, "New Chat")
         sidebar_layout.addWidget(self.new_chat_btn)
+
+        sidebar_actions = QHBoxLayout()
+        sidebar_actions.setSpacing(8)
+        self.delete_chat_btn = PushButton(FIF.DELETE, "Delete Chat")
+        self.delete_chat_btn.setEnabled(False)
+        sidebar_actions.addWidget(self.delete_chat_btn)
+        sidebar_layout.addLayout(sidebar_actions)
 
         # Session List
         self.session_list = ListWidget()
@@ -92,8 +101,9 @@ class ChatTab(QWidget):
 
         # TTS Toggle
         self.tts_toggle = SwitchButton()
-        self.tts_toggle.setOnText("Voice On")
-        self.tts_toggle.setOffText("Voice Off")
+        self.tts_toggle.setOnText("Speak responses")
+        self.tts_toggle.setOffText("Speak off")
+        self.tts_toggle.setChecked(TTS_ENABLED and SPEAK_RESPONSES)
         header_layout.addWidget(self.tts_toggle)
 
         chat_layout.addWidget(header)
@@ -110,6 +120,7 @@ class ChatTab(QWidget):
         self.chat_container_layout = QVBoxLayout(self.chat_container)
         self.chat_container_layout.setContentsMargins(20, 10, 20, 10)
         self.chat_container_layout.setSpacing(15)
+        self._add_empty_state()
         self.chat_container_layout.addStretch()
 
         self.chat_scroll.setWidget(self.chat_container)
@@ -117,18 +128,42 @@ class ChatTab(QWidget):
 
         # Input Bar
         input_bar = QFrame()
-        input_bar.setFixedHeight(80)
-        input_bar.setStyleSheet("background-color: transparent; border-top: 1px solid rgba(255, 255, 255, 0.05);")
+        input_bar.setFixedHeight(96)
+        input_bar.setStyleSheet("""
+            background-color: rgba(15, 21, 36, 0.92);
+            border-top: 1px solid rgba(51, 181, 229, 0.14);
+        """)
         
         input_layout = QHBoxLayout(input_bar)
         input_layout.setContentsMargins(20, 10, 20, 20)
         input_layout.setSpacing(10)
 
         self.user_input = LineEdit()
-        self.user_input.setPlaceholderText("Ask generic anything...")
+        self.user_input.setPlaceholderText(f"Message {ASSISTANT_NAME}...")
         self.user_input.setClearButtonEnabled(True)
-        self.user_input.setFixedHeight(40)
+        self.user_input.setFixedHeight(46)
+        self.user_input.setReadOnly(not TEXT_CHAT_ENABLED)
+        self.user_input.setEnabled(TEXT_CHAT_ENABLED)
+        self.user_input.setFocusPolicy(Qt.StrongFocus)
+        self.user_input.setStyleSheet("""
+            LineEdit {
+                border-radius: 18px;
+                padding-left: 16px;
+                padding-right: 16px;
+                font-size: 14px;
+                background-color: #111827;
+                border: 1px solid #263348;
+            }
+            LineEdit:focus {
+                border: 1px solid #33b5e5;
+                background-color: #141c2f;
+            }
+        """)
         input_layout.addWidget(self.user_input, 1)
+
+        self.voice_btn = PushButton(FIF.MICROPHONE, "Voice")
+        self.voice_btn.setFixedWidth(98)
+        input_layout.addWidget(self.voice_btn)
 
         self.stop_btn = PrimaryPushButton(FIF.CLOSE, "Stop")
         self.stop_btn.setVisible(False)
@@ -137,6 +172,7 @@ class ChatTab(QWidget):
 
         self.send_btn = PrimaryPushButton(FIF.SEND, "Send")
         self.send_btn.setFixedWidth(100)
+        self.send_btn.setEnabled(TEXT_CHAT_ENABLED)
         input_layout.addWidget(self.send_btn)
 
         chat_layout.addWidget(input_bar)
@@ -150,17 +186,74 @@ class ChatTab(QWidget):
         self.user_input.returnPressed.connect(self._on_send_clicked)
         self.stop_btn.clicked.connect(self.stop_generation_requested.emit)
         self.tts_toggle.checkedChanged.connect(self.tts_toggled.emit)
+        self.voice_btn.clicked.connect(self.voice_input_requested.emit)
         self.session_list.itemClicked.connect(self._on_session_clicked)
+        self.session_list.currentItemChanged.connect(self._on_session_selection_changed)
+        self.delete_chat_btn.clicked.connect(self._delete_selected_session)
 
     def _on_send_clicked(self):
         text = self.user_input.text()
         if text.strip():
             self.send_message_requested.emit(text)
 
+    def _add_empty_state(self):
+        self.empty_state = QFrame()
+        self.empty_state.setObjectName("chatEmptyState")
+        self.empty_state.setStyleSheet("""
+            QFrame#chatEmptyState {
+                background-color: rgba(17, 22, 37, 0.72);
+                border: 1px solid rgba(51, 181, 229, 0.16);
+                border-radius: 16px;
+            }
+        """)
+        empty_layout = QVBoxLayout(self.empty_state)
+        empty_layout.setContentsMargins(24, 22, 24, 22)
+        empty_layout.setSpacing(8)
+        title = QLabel(f"How can {ASSISTANT_NAME} help?")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #ffffff; font-size: 24px; font-weight: 700;")
+        subtitle = QLabel("Ask a question, plan a task, research the web, or use voice when you are ready.")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("color: #8b9bb4; font-size: 13px;")
+        empty_layout.addWidget(title)
+        empty_layout.addWidget(subtitle)
+        count = self.chat_container_layout.count()
+        if count:
+            self.chat_container_layout.insertWidget(count - 1, self.empty_state)
+        else:
+            self.chat_container_layout.addWidget(self.empty_state)
+
+    def _hide_empty_state(self):
+        if hasattr(self, "empty_state") and self.empty_state:
+            self.empty_state.hide()
+
     def _on_session_clicked(self, item: QListWidgetItem):
         session_id = item.data(Qt.UserRole)
         if session_id:
             self.session_selected.emit(session_id)
+
+    def _on_session_selection_changed(self, current: QListWidgetItem, previous: QListWidgetItem):
+        self.delete_chat_btn.setEnabled(bool(current and current.data(Qt.UserRole)))
+
+    def _delete_selected_session(self):
+        item = self.session_list.currentItem()
+        if not item:
+            return
+        session_id = item.data(Qt.UserRole)
+        if not session_id:
+            return
+
+        title = item.text()
+        result = QMessageBox.question(
+            self,
+            "Delete Chat",
+            f"Delete this conversation?\n\n{title}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if result == QMessageBox.Yes:
+            self.session_delete_requested.emit(session_id)
 
     # --- Public API for Controller/MainWindow ---
 
@@ -175,12 +268,24 @@ class ChatTab(QWidget):
          """Switch states."""
          self.send_btn.setVisible(not is_generating)
          self.stop_btn.setVisible(is_generating)
-         self.user_input.setEnabled(not is_generating)
+         self.user_input.setEnabled(TEXT_CHAT_ENABLED)
+         self.user_input.setReadOnly(not TEXT_CHAT_ENABLED)
+         self.voice_btn.setEnabled(not is_generating)
          if not is_generating:
+             self.user_input.setFocus()
+
+    def set_voice_listening_state(self, is_listening: bool):
+         """Voice capture should not disable text chat fallback."""
+         self.voice_btn.setEnabled(not is_listening)
+         self.user_input.setEnabled(TEXT_CHAT_ENABLED)
+         self.user_input.setReadOnly(not TEXT_CHAT_ENABLED)
+         self.send_btn.setEnabled(TEXT_CHAT_ENABLED)
+         if not is_listening:
              self.user_input.setFocus()
 
     def add_message_bubble(self, role: str, text: str, is_thinking: bool = False):
         """Add a bubble."""
+        self._hide_empty_state()
         # Note: MessageBubble might need updates to look good on transparent background
         bubble = MessageBubble(role, text, is_thinking)
         
@@ -204,6 +309,7 @@ class ChatTab(QWidget):
 
     def add_streaming_widgets(self, thinking_ui, search_indicator, response_bubble):
         """Add streaming widgets."""
+        self._hide_empty_state()
         wrapper = QWidget()
         wrapper.setStyleSheet("background: transparent;")
         wrapper_layout = QVBoxLayout(wrapper)
@@ -233,6 +339,19 @@ class ChatTab(QWidget):
             item = self.chat_container_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._add_empty_state()
+        self.user_input.clear()
+        self.user_input.setEnabled(TEXT_CHAT_ENABLED)
+        self.user_input.setReadOnly(not TEXT_CHAT_ENABLED)
+        self.send_btn.setVisible(True)
+        self.send_btn.setEnabled(TEXT_CHAT_ENABLED)
+        self.stop_btn.setVisible(False)
+        self.voice_btn.setEnabled(True)
+        QTimer.singleShot(0, self.user_input.setFocus)
+
+    def reset_for_new_chat(self):
+        self.clear_chat_display()
+        self.set_status("Ready")
 
     def scroll_to_bottom(self):
         scrollbar = self.chat_scroll.verticalScrollBar()
@@ -241,6 +360,7 @@ class ChatTab(QWidget):
     def refresh_sidebar(self, current_session_id: str = None):
         """Refresh sidebar list."""
         self.session_list.clear()
+        self.delete_chat_btn.setEnabled(False)
         sessions = history_manager.get_sessions()
         
         for sess in sessions:

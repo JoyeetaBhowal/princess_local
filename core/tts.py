@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
+from config import TTS_CONFIG_URL, TTS_MODEL_URL, TTS_VOICE_MODEL
 
 # ANSI colors for console output
 GRAY = "\033[90m"
@@ -65,9 +66,9 @@ class SentenceBuffer:
 class PiperTTS:
     """Piper TTS wrapper using pre-built executable for Windows compatibility."""
     
-    VOICE_MODEL = "en_GB-northern_english_male-medium"
-    MODEL_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx"
-    CONFIG_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx.json"
+    VOICE_MODEL = TTS_VOICE_MODEL
+    MODEL_URL = TTS_MODEL_URL
+    CONFIG_URL = TTS_CONFIG_URL
     
     # Piper Windows executable
     PIPER_VERSION = "2023.11.14-2"
@@ -92,7 +93,7 @@ class PiperTTS:
         piper_exe = piper_exe_dir / "piper.exe"
         
         if piper_exe.exists():
-            print(f"{GREEN}[TTS] ✓ Piper executable found{RESET}")
+            print(f"{GREEN}[TTS] Piper executable found{RESET}")
             return str(piper_exe)
         
         print(f"{CYAN}[TTS] Downloading Piper executable...{RESET}")
@@ -132,7 +133,7 @@ class PiperTTS:
                             with zf.open(member) as src, open(target_path, 'wb') as dst:
                                 dst.write(src.read())
             
-            print(f"{GREEN}[TTS] ✓ Piper executable extracted!{RESET}")
+            print(f"{GREEN}[TTS] Piper executable extracted{RESET}")
             return str(piper_exe)
             
         except Exception as e:
@@ -156,7 +157,7 @@ class PiperTTS:
             r.raise_for_status()
             with open(config_path, 'wb') as f:
                 f.write(r.content)
-            print(f"{GREEN}[TTS] ✓ Model downloaded!{RESET}")
+            print(f"{GREEN}[TTS] Model downloaded{RESET}")
         
         return str(model_path)
     
@@ -192,7 +193,7 @@ class PiperTTS:
             self.worker_thread = threading.Thread(target=self._speech_worker, daemon=True)
             self.worker_thread.start()
             
-            print(f"{GREEN}[TTS] ✓ Piper TTS ready ({self.VOICE_MODEL}){RESET}")
+            print(f"{GREEN}[TTS] Piper TTS ready ({self.VOICE_MODEL}){RESET}")
             return True
             
         except Exception as e:

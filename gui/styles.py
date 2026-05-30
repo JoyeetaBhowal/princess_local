@@ -1,5 +1,5 @@
 """
-Global stylesheet for the Pocket AI application (Aura AI Theme).
+Global stylesheet for Princess.
 """
 
 # Aura Theme Colors
@@ -44,8 +44,82 @@ BodyLabel, CaptionLabel {
 }
 
 /* Standard QWidget used as containers */
-QWidget#chatContent, QWidget#plannerPanel, QWidget#briefingView, QFrame#homeAutomationView {
+QWidget#chatContent, QWidget#plannerPanel, QWidget#briefingView, QWidget#commandCenterInterface, QFrame#homeAutomationView {
     background-color: transparent;
+}
+
+  QFrame#commandPanel {
+      background-color: #08111f;
+      border: 1px solid #1f3f5f;
+      border-radius: 8px;
+  }
+  
+  QFrame#commandPanelFun {
+      background-color: #071522;
+      border: 1px solid rgba(51, 181, 229, 0.35);
+      border-radius: 8px;
+  }
+  
+  QFrame#commandPanelHero {
+      background-color: #0b1728;
+      border: 1px solid rgba(255, 187, 51, 0.40);
+      border-radius: 8px;
+  }
+  
+  QFrame#commandPanel:hover, QFrame#commandPanelFun:hover, QFrame#commandPanelHero:hover {
+      border: 1px solid rgba(51, 181, 229, 0.65);
+  }
+
+  QFrame#commandHeader {
+      background-color: #07101e;
+      border: 1px solid rgba(51, 181, 229, 0.52);
+      border-radius: 8px;
+  }
+
+  QLabel#commandCore {
+      background-color: #091a28;
+      color: #33d6ff;
+      border: 2px solid rgba(51, 214, 255, 0.72);
+      border-radius: 39px;
+      font-size: 34px;
+      font-weight: 700;
+  }
+
+  QFrame#commandChip_good,
+  QFrame#commandChip_warn,
+  QFrame#commandChip_muted {
+      background-color: #0d1a2b;
+      border-radius: 6px;
+      min-width: 92px;
+  }
+
+  QFrame#commandChip_good {
+      border: 1px solid rgba(51, 214, 255, 0.55);
+  }
+
+  QFrame#commandChip_warn {
+      border: 1px solid rgba(255, 187, 51, 0.64);
+  }
+
+  QFrame#commandChip_muted {
+      border: 1px solid rgba(139, 155, 180, 0.40);
+  }
+
+  QFrame#commandAppTile {
+      background-color: #0b1b2c;
+      border: 1px solid rgba(51, 181, 229, 0.24);
+      border-radius: 8px;
+  }
+
+  QFrame#commandAppTile:hover {
+      background-color: #102844;
+      border: 1px solid rgba(51, 214, 255, 0.72);
+  }
+  
+  QFrame#commandItem {
+      background-color: #141c2f;
+    border: 1px solid #1f2a42;
+    border-radius: 6px;
 }
 
 /* List Items (Session List) */

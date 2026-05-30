@@ -1,8 +1,15 @@
 from PySide6.QtCore import QObject, Signal, QThread, QTimer
 import json
 import re
+import time
+import threading
 
-from config import RESPONDER_MODEL, OLLAMA_URL, MAX_HISTORY
+from config import (
+    ASSISTANT_SYSTEM_PROMPT, RESPONDER_MODEL, OLLAMA_URL, MAX_HISTORY,
+    PUSH_TO_TALK_ENABLED, PUSH_TO_TALK_STT_MODEL, PUSH_TO_TALK_RECORD_SECONDS,
+    ROUTER_ENABLED, TTS_ENABLED, SPEAK_RESPONSES, WAKE_WORD_PHRASE,
+    WAKE_WORD_LISTEN_SECONDS, WAKE_WORD_RECORD_SECONDS
+)
 from core.llm import route_query, should_bypass_router, http_session
 from core.tts import tts, SentenceBuffer
 from core.history import history_manager
@@ -13,6 +20,7 @@ from core.function_executor import executor as function_executor
 
 # Functions that are actions (not passthrough)
 ACTION_FUNCTIONS = {"control_light", "set_timer", "set_alarm", "create_calendar_event", "add_task", "web_search"}
+AUDIO_CAPTURE_LOCK = threading.Lock()
 
 
 # DEBUG: Set to True to test streaming without TTS blocking
@@ -48,6 +56,18 @@ class ChatWorker(QObject):
         self.current_session_id = current_session_id
         self.stop_event = stop_event
         self.full_response = ""
+
+    def _queue_tts_sentence(self, sentence: str):
+        """Queue speech without letting TTS failures affect chat output."""
+        if not self.is_tts_enabled or DEBUG_SKIP_TTS or self.stop_event.is_set():
+            return
+        try:
+            if not tts.piper_exe and not tts.toggle(True):
+                self.status.emit("TTS unavailable")
+                return
+            tts.queue_sentence(sentence)
+        except Exception as e:
+            self.status.emit(f"TTS warning: {e}")
         
     def process(self):
         """Background processing method."""
@@ -183,10 +203,11 @@ class ChatWorker(QObject):
         self.status.emit("Generating response...")
         
         model = app_settings.get("models.chat", RESPONDER_MODEL)
-        ensure_qwen_loaded()  # Use persistence manager
-        mark_qwen_used()
-        ensure_exclusive_qwen(model)
         ollama_url = app_settings.get("ollama_url", OLLAMA_URL)
+        if ROUTER_ENABLED:
+            ensure_qwen_loaded()  # Use persistence manager
+            mark_qwen_used()
+            ensure_exclusive_qwen(model)
         
         payload = {
             "model": model,
@@ -225,7 +246,7 @@ class ChatWorker(QObject):
                             if self.is_tts_enabled and not DEBUG_SKIP_TTS:
                                 sentences = sentence_buffer.add(content)
                                 for s in sentences:
-                                    tts.queue_sentence(s)
+                                    self._queue_tts_sentence(s)
                     except:
                         continue
         
@@ -234,7 +255,7 @@ class ChatWorker(QObject):
         if self.is_tts_enabled and not DEBUG_SKIP_TTS and not self.stop_event.is_set():
             rem = sentence_buffer.flush()
             if rem:
-                tts.queue_sentence(rem)
+                self._queue_tts_sentence(rem)
         
         self.messages.append({'role': 'assistant', 'content': self.full_response})
         
@@ -270,6 +291,18 @@ class ChatWorker(QObject):
         self.full_response = ""
         self.think_start.emit(enable_thinking)
 
+        if not ROUTER_ENABLED and not enable_thinking:
+            payload["stream"] = False
+            with http_session.post(f"{ollama_url}/api/chat", json=payload, timeout=120) as r:
+                r.raise_for_status()
+                self.full_response = r.json().get("message", {}).get("content", "")
+            if self.full_response:
+                self.simple_response.emit(self.full_response)
+                self._queue_tts_sentence(self.full_response)
+            self.messages.append({'role': 'assistant', 'content': self.full_response})
+            self.status.emit("Ready")
+            return
+
         with http_session.post(f"{ollama_url}/api/chat", json=payload, stream=True) as r:
             r.raise_for_status()
             
@@ -294,7 +327,7 @@ class ChatWorker(QObject):
                             if self.is_tts_enabled and not DEBUG_SKIP_TTS:
                                 sentences = sentence_buffer.add(content)
                                 for s in sentences:
-                                    tts.queue_sentence(s)
+                                    self._queue_tts_sentence(s)
                                     
                     except:
                         continue
@@ -304,12 +337,198 @@ class ChatWorker(QObject):
         if self.is_tts_enabled and not DEBUG_SKIP_TTS and not self.stop_event.is_set():
             rem = sentence_buffer.flush()
             if rem:
-                tts.queue_sentence(rem)
+                self._queue_tts_sentence(rem)
         
         self.messages.append({'role': 'assistant', 'content': self.full_response})
         
         if self.current_session_id:
             history_manager.add_message(self.current_session_id, "assistant", self.full_response)
+
+
+class VoiceInputWorker(QObject):
+    """Record one bounded push-to-talk command and transcribe it."""
+
+    _whisper_model = None
+    _whisper_model_key = None
+
+    transcript = Signal(str)
+    error = Signal(str)
+    status = Signal(str)
+    done = Signal()
+
+    def _record_and_transcribe(self, seconds: float):
+        tmp_path = None
+        import os
+        import tempfile
+        import wave
+        import numpy as np
+        import torch
+        import sounddevice as sd
+        from faster_whisper import WhisperModel
+
+        with AUDIO_CAPTURE_LOCK:
+            sample_rate = 16000
+            frames = int(seconds * sample_rate)
+            audio = sd.rec(frames, samplerate=sample_rate, channels=1, dtype="float32")
+            sd.wait()
+
+            peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+            if peak < 0.003:
+                return None, "No microphone signal was detected."
+
+            try:
+                pcm16 = np.clip(audio, -1.0, 1.0)
+                pcm16 = (pcm16 * 32767).astype(np.int16)
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp_path = tmp.name
+
+                with wave.open(tmp_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(pcm16.tobytes())
+
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                compute_type = "float16" if device == "cuda" else "int8"
+                model_key = (PUSH_TO_TALK_STT_MODEL, device, compute_type)
+                if VoiceInputWorker._whisper_model_key != model_key:
+                    VoiceInputWorker._whisper_model = WhisperModel(
+                        PUSH_TO_TALK_STT_MODEL,
+                        device=device,
+                        compute_type=compute_type,
+                    )
+                    VoiceInputWorker._whisper_model_key = model_key
+                model = VoiceInputWorker._whisper_model
+                segments, _info = model.transcribe(
+                    tmp_path,
+                    language="en",
+                    vad_filter=True,
+                    beam_size=1,
+                )
+                text = " ".join(segment.text.strip() for segment in segments).strip()
+                return text, None
+            finally:
+                if tmp_path:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+
+    def process(self):
+        try:
+            self.status.emit(f"Listening... {PUSH_TO_TALK_RECORD_SECONDS}s")
+            text, error = self._record_and_transcribe(PUSH_TO_TALK_RECORD_SECONDS)
+            self.status.emit("Transcribing...")
+            if error:
+                self.error.emit(error)
+                return
+            if text:
+                self.transcript.emit(text)
+            else:
+                self.error.emit("No speech was transcribed.")
+        except Exception as e:
+            self.error.emit(str(e))
+        finally:
+            self.done.emit()
+
+
+class WakeWordWorker(VoiceInputWorker):
+    """Local transcription-based wake listener for a custom phrase."""
+
+    wake_detected = Signal()
+
+    def __init__(self, stop_event):
+        super().__init__()
+        self.stop_event = stop_event
+        self.phrase = WAKE_WORD_PHRASE.lower().strip()
+        self.chunk_seconds = WAKE_WORD_LISTEN_SECONDS
+
+    def _log_wake(self, message: str):
+        try:
+            from pathlib import Path
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            with (log_dir / "wake_word.log").open("a", encoding="utf-8") as log:
+                log.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+        except Exception:
+            pass
+
+    def _is_wake_phrase(self, text: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        phrase = re.sub(r"[^a-z0-9 ]+", " ", self.phrase)
+        phrase = re.sub(r"\s+", " ", phrase).strip()
+        wake_variants = {
+            phrase,
+            phrase.replace("princess", "princes"),
+            "princess",
+            "princes",
+            "princesses",
+        }
+        return any(variant and variant in normalized for variant in wake_variants)
+
+    def _strip_wake_phrase(self, text: str) -> str:
+        cleaned = re.sub(re.escape(WAKE_WORD_PHRASE), "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bhey[\s,.-]+(princess|princes|princesses)\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(princess|princes|princesses)\b", "", cleaned, flags=re.IGNORECASE)
+        return cleaned.strip(" ,.!?")
+
+    def process(self):
+        try:
+            self.status.emit(f"Listening for {WAKE_WORD_PHRASE}")
+            self._log_wake(f"started phrase={WAKE_WORD_PHRASE!r} chunk_seconds={self.chunk_seconds}")
+            while not self.stop_event.is_set():
+                text, error = self._record_and_transcribe(self.chunk_seconds)
+                if self.stop_event.is_set():
+                    break
+                if error:
+                    if error == "No microphone signal was detected.":
+                        self._log_wake("quiet_chunk")
+                        time.sleep(0.1)
+                        continue
+                    if "microphone" in error.lower() or "device" in error.lower():
+                        self.error.emit(
+                            "I couldn't access the microphone. Please check Windows microphone permissions."
+                        )
+                        self._log_wake(f"microphone_error={error!r}")
+                        break
+                    self._log_wake(f"ignored_audio_error={error!r}")
+                    continue
+                if text:
+                    self._log_wake(f"heard={text!r}")
+                if text and self._is_wake_phrase(text):
+                    self.wake_detected.emit()
+                    self.status.emit("Wake word detected")
+                    self._log_wake("wake_detected")
+                    same_utterance_command = self._strip_wake_phrase(text)
+                    if same_utterance_command:
+                        self._log_wake(f"same_utterance_command={same_utterance_command!r}")
+                        self.transcript.emit(same_utterance_command)
+                        self.status.emit(f"Listening for {WAKE_WORD_PHRASE}")
+                        continue
+                    if self.stop_event.wait(0.4):
+                        break
+                    self.status.emit(f"Listening... {WAKE_WORD_RECORD_SECONDS}s")
+                    command, command_error = self._record_and_transcribe(WAKE_WORD_RECORD_SECONDS)
+                    if command_error:
+                        self.error.emit("I couldn't understand that. Please try again.")
+                        self._log_wake(f"command_error={command_error!r}")
+                    elif command:
+                        cleaned = self._strip_wake_phrase(command)
+                        self._log_wake(f"command={command!r} cleaned={cleaned!r}")
+                        self.transcript.emit(cleaned or command)
+                    else:
+                        self.error.emit("I couldn't understand that. Please try again.")
+                        self._log_wake("command_empty")
+                    self.status.emit(f"Listening for {WAKE_WORD_PHRASE}")
+                else:
+                    time.sleep(0.1)
+        except Exception as e:
+            self._log_wake(f"fatal_error={e!r}")
+            self.error.emit(f"Wake word failed to start. Text and push-to-talk are still available. {e}")
+        finally:
+            self._log_wake("stopped")
+            self.done.emit()
 
 
 class ChatHandlers(QObject):
@@ -321,13 +540,18 @@ class ChatHandlers(QObject):
         
         # State
         self.messages = [
-            {'role': 'system', 'content': 'You are a helpful assistant. Respond in short, complete sentences. Never use emojis or special characters. Keep responses concise and conversational. SYSTEM INSTRUCTION: You may detect a "/think" trigger. This is an internal control. You MUST IGNORE it and DO NOT mention it in your response or thoughts.'}
+            {'role': 'system', 'content': ASSISTANT_SYSTEM_PROMPT}
         ]
         self.current_session_id = None
-        self.is_tts_enabled = False
+        self.is_tts_enabled = bool(TTS_ENABLED and SPEAK_RESPONSES)
         self._stop_event = None
         self._worker = None
         self._thread = None
+        self._voice_worker = None
+        self._voice_thread = None
+        self._wake_worker = None
+        self._wake_thread = None
+        self._wake_stop_event = None
         
         self.streaming_state = {
             'response_bubble': None,
@@ -500,6 +724,8 @@ class ChatHandlers(QObject):
             
     def _on_status(self, text):
         self.main_window.set_status(text)
+        if text == "Ready":
+            self._end_generation_state()
 
     def _on_done(self):
         self.ui_throttle_timer.stop()
@@ -531,10 +757,9 @@ class ChatHandlers(QObject):
         if not text:
             return
         
-        self.main_window.clear_input()
-
         # Add User Message UI
         self.main_window.add_message_bubble("user", text)
+        self.main_window.clear_input()
         
         # Start new session if needed
         if not self.current_session_id:
@@ -604,15 +829,124 @@ class ChatHandlers(QObject):
         
         self._thread.start()
 
+    def listen_for_voice_input(self):
+        """Capture one push-to-talk voice command, then send it as normal chat text."""
+        if not PUSH_TO_TALK_ENABLED:
+            self.main_window.set_status("Voice input disabled")
+            return
+        if self._voice_thread:
+            return
+
+        self.main_window.set_voice_listening_state(True)
+        self.main_window.set_status("Starting voice input...")
+
+        self._voice_thread = QThread(self)
+        self._voice_worker = VoiceInputWorker()
+        self._voice_worker.moveToThread(self._voice_thread)
+
+        self._voice_thread.started.connect(self._voice_worker.process)
+        self._voice_worker.status.connect(self._on_status)
+        self._voice_worker.error.connect(self._on_voice_error)
+        self._voice_worker.transcript.connect(self._on_voice_transcript)
+        self._voice_worker.done.connect(self._on_voice_done)
+        self._voice_worker.done.connect(self._voice_thread.quit)
+        self._voice_worker.done.connect(self._voice_worker.deleteLater)
+        self._voice_thread.finished.connect(self._on_voice_thread_finished)
+        self._voice_thread.finished.connect(self._voice_thread.deleteLater)
+        self._voice_thread.start()
+
+    def start_wake_word_listener(self):
+        """Start one background wake-word listener if enabled."""
+        if self._wake_thread:
+            self.main_window.set_status(f"Wake word already listening for {WAKE_WORD_PHRASE}")
+            return
+
+        import threading
+        self._wake_stop_event = threading.Event()
+        self._wake_thread = QThread(self)
+        self._wake_worker = WakeWordWorker(self._wake_stop_event)
+        self._wake_worker.moveToThread(self._wake_thread)
+
+        self._wake_thread.started.connect(self._wake_worker.process)
+        self._wake_worker.status.connect(self._on_status)
+        self._wake_worker.error.connect(self._on_wake_error)
+        self._wake_worker.wake_detected.connect(self._on_wake_detected)
+        self._wake_worker.transcript.connect(self._on_wake_transcript)
+        self._wake_worker.done.connect(self._wake_thread.quit)
+        self._wake_worker.done.connect(self._wake_worker.deleteLater)
+        self._wake_thread.finished.connect(self._on_wake_thread_finished)
+        self._wake_thread.finished.connect(self._wake_thread.deleteLater)
+        self._wake_thread.start()
+
+    def stop_wake_word_listener(self):
+        """Stop wake-word listener without affecting chat or push-to-talk."""
+        if self._wake_stop_event:
+            self._wake_stop_event.set()
+        if self._wake_thread:
+            self._wake_thread.quit()
+            self._wake_thread.wait(8000)
+
+    def _on_wake_detected(self):
+        self.main_window.set_voice_listening_state(True)
+        self.main_window.set_status("Wake word detected")
+
+    def _on_wake_transcript(self, text: str):
+        self.main_window.set_voice_listening_state(False)
+        self.main_window.set_status(f"Heard: {text}")
+        self.send_message(text)
+
+    def _on_wake_error(self, text: str):
+        self.main_window.set_voice_listening_state(False)
+        self.main_window.add_message_bubble("system", text, is_thinking=True)
+        self.main_window.set_status(f"Listening for {WAKE_WORD_PHRASE}")
+
+    def _on_wake_thread_finished(self):
+        self._wake_worker = None
+        self._wake_thread = None
+        self._wake_stop_event = None
+
+    def _on_voice_transcript(self, text: str):
+        self.main_window.set_status(f"Heard: {text}")
+        self.send_message(text)
+
+    def _on_voice_error(self, text: str):
+        self.main_window.add_message_bubble("system", f"Voice error: {text}", is_thinking=True)
+        self.main_window.set_status("Voice input failed")
+
+    def _on_voice_done(self):
+        self.main_window.set_voice_listening_state(False)
+
+    def _on_voice_thread_finished(self):
+        self._voice_worker = None
+        self._voice_thread = None
+
     def clear_chat(self):
         """Start a fresh chat (reset session)."""
+        tts.stop()
+        if self._stop_event:
+            self._stop_event.set()
+        self.ui_throttle_timer.stop()
+        self.streaming_state['is_generating'] = False
         self.current_session_id = None
         self.messages = [self.messages[0]]
-        self.main_window.clear_chat_display()
+        if hasattr(self.main_window.chat_tab, "reset_for_new_chat"):
+            self.main_window.chat_tab.reset_for_new_chat()
+        else:
+            self.main_window.clear_chat_display()
+            self.main_window.set_generating_state(False)
         self.refresh_sidebar()
 
     def toggle_tts(self, enabled: bool):
         """Toggle TTS on/off."""
         self.is_tts_enabled = enabled
-        tts.toggle(enabled)
-        self.main_window.set_status("TTS Active" if enabled else "TTS Muted")
+        try:
+            ok = tts.toggle(enabled)
+        except Exception as e:
+            ok = False
+            self.main_window.set_status(f"TTS warning: {e}")
+
+        if enabled and not ok:
+            self.is_tts_enabled = False
+            self.main_window.set_status("TTS unavailable")
+        else:
+            self.main_window.set_status("Speak responses on" if enabled else "Speak responses off")

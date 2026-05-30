@@ -1,5 +1,5 @@
 # =====================================================
-# Pocket AI (A.D.A) - Python Dependencies
+# Princess - Python Dependencies
 # =====================================================
 # 
 # Install all dependencies with:
@@ -37,6 +37,8 @@ soundfile>=0.13.0              # Audio file I/O
 numpy>=2.0.0                   # Numerical computing (audio processing)
 realtimestt>=0.3.0             # Real-time speech-to-text with wake word detection
 PyAudio>=0.2.14                # Audio I/O for microphone access
+faster-whisper>=1.2.1          # RealtimeSTT transcription backend
+silero-vad>=6.2.1              # RealtimeSTT voice activity detection
 
 # -----------------------------------------------------
 # Browser Automation
