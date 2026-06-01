@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 import threading
 import time
 
+from config import INTERNET_ENABLED, MAX_RESEARCH_RESULTS
+from core.internet import friendly_internet_error, internet_disabled_message
+
 
 @dataclass
 class ActiveTimer:
@@ -449,17 +452,19 @@ class FunctionExecutor:
         
         if not query:
             return {"success": False, "message": "No search query provided", "data": None}
+        if not INTERNET_ENABLED:
+            return {"success": False, "message": internet_disabled_message(), "data": None}
         
         try:
             from duckduckgo_search import DDGS
             
             with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=5))
+                results = list(ddgs.text(query, max_results=MAX_RESEARCH_RESULTS))
             
             if results:
                 # Format results for display
                 formatted = []
-                for r in results[:3]:
+                for r in results[:MAX_RESEARCH_RESULTS]:
                     formatted.append({
                         "title": r.get("title", ""),
                         "body": r.get("body", "")[:200],
@@ -468,14 +473,14 @@ class FunctionExecutor:
                 
                 return {
                     "success": True,
-                    "message": f"Found {len(results)} results for '{query}'",
+                    "message": f"Used current internet information: found {len(results)} results for '{query}'",
                     "data": {"query": query, "results": formatted}
                 }
             
             return {"success": True, "message": f"No results found for '{query}'", "data": None}
             
         except Exception as e:
-            return {"success": False, "message": f"Search failed: {e}", "data": None}
+            return {"success": False, "message": friendly_internet_error(e), "data": None}
     
     # === System Info ===
     

@@ -386,6 +386,12 @@ class CommandCenterTab(QWidget):
         self.updates_status = CaptionLabel("Ready", self)
         layout.addWidget(self.updates_status)
 
+        self.internet_mode_label = CaptionLabel(
+            "Internet mode: on" if INTERNET_ENABLED else "Internet mode: off | local only",
+            self,
+        )
+        layout.addWidget(self.internet_mode_label)
+
         scroll = ScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
@@ -835,8 +841,14 @@ class CommandCenterTab(QWidget):
         return f"{daily} | {approval} | {posting} | {internet}"
 
     def load_updates(self):
+        if not INTERNET_ENABLED:
+            self.updates_status.setText("Internet mode is off. Local chat still works.")
+            return
         self.refresh_btn.setEnabled(False)
         self.updates_status.setText("Connecting to internet sources...")
+        if hasattr(self, "mission_state"):
+            self.mission_state.setText("Research Radar is checking current information.")
+        self._set_mission_status("Searching", "active")
         self._clear_layout(self.updates_layout)
 
         self._updates_thread = UpdatesLoaderThread()
@@ -852,6 +864,7 @@ class CommandCenterTab(QWidget):
         )
         if hasattr(self, "mission_state"):
             self.mission_state.setText("Signal Radar refreshed. Local chat stayed available.")
+        self._set_mission_status("Searching", "done" if self.all_updates else "standby")
         self.render_updates()
 
     def render_updates(self):

@@ -4,7 +4,8 @@ import datetime
 import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus
 from duckduckgo_search import DDGS
-from config import OLLAMA_URL, RESPONDER_MODEL
+from config import INTERNET_ENABLED, MAX_RESEARCH_RESULTS, OLLAMA_URL, RESPONDER_MODEL
+from core.internet import friendly_internet_error, internet_disabled_message
 
 class NewsManager:
     """Manages fetching and curating news for the Briefing dashboard."""
@@ -30,6 +31,10 @@ class NewsManager:
         """
         # 1. Check cache first
         if status_callback: status_callback("Checking local cache...")
+        if not INTERNET_ENABLED:
+            if status_callback:
+                status_callback(internet_disabled_message())
+            return []
         cache_key = "briefing_ai" if use_ai else "briefing_raw"
         cached = self._get_from_cache(cache_key)
         if cached:
@@ -57,8 +62,8 @@ class NewsManager:
 
         except Exception as e:
             print(f"Error fetching news from DDGS: {e}")
-            # Rate limit or connection error - return empty to trigger fallback
-            # In a production app, we might retry with backoff, but for now we fail gracefully.
+            if status_callback:
+                status_callback(friendly_internet_error(e))
             return []
 
         # 3. AI Curation
@@ -85,6 +90,11 @@ class NewsManager:
         limit_per_category: int = 4,
     ) -> list:
         """Fetch current headlines and trends grouped for the command center."""
+        if not INTERNET_ENABLED:
+            if status_callback:
+                status_callback(internet_disabled_message())
+            return []
+
         cache_key = f"categorized_{limit_per_category}"
         if status_callback:
             status_callback("Checking local cache...")
@@ -104,9 +114,13 @@ class NewsManager:
                     raw_news.append(result)
         except Exception as e:
             print(f"Error fetching categorized updates from DDGS: {e}")
+            if status_callback:
+                status_callback(friendly_internet_error(e))
             raw_news = self._fetch_rss_fallback(status_callback, limit_per_category)
 
         if not raw_news:
+            if status_callback:
+                status_callback("Internet search is temporarily limited. Local chat still works.")
             return []
 
         formatted = self._format_raw_fallback(raw_news, max_items=limit_per_category * 6)
@@ -134,7 +148,7 @@ class NewsManager:
                 response = requests.get(url, headers=headers, timeout=20)
                 response.raise_for_status()
                 root = ET.fromstring(response.content)
-                for item in root.findall(".//item")[:limit_per_category]:
+                for item in root.findall(".//item")[: min(limit_per_category, MAX_RESEARCH_RESULTS)]:
                     raw_news.append({
                         "title": self._xml_text(item, "title"),
                         "source": self._xml_text(item, "source") or "Google News",
